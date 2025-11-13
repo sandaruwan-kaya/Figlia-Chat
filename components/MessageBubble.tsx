@@ -43,34 +43,89 @@ export default function MessageBubble({ message }: { message: Message }) {
             remarkPlugins={[remarkGfm]}     // ← fixes lists, tables, spacing
             rehypePlugins={[rehypeRaw]}
             components={{
-              p({ children }) {
+                p({ children }) {
                 return <p className="mb-3 leading-relaxed">{children}</p>;
-              },
-              ul({ children }) {
+                },
+                ul({ children }) {
                 return <ul className="list-disc pl-6 space-y-1">{children}</ul>;
-              },
-              ol({ children }) {
+                },
+                ol({ children }) {
                 return <ol className="list-decimal pl-6 space-y-1">{children}</ol>;
-              },
-              li({ children }) {
+                },
+                li({ children }) {
                 return <li className="leading-relaxed">{children}</li>;
-              },
-              code({ inline, className, children }) {
+                },
+                hr() {
+                    return (
+                    <hr className="my-6 border-t border-gray-300/70" />
+                    );
+                },
+                table({ children }) {
+                return (
+                    <div className="w-full overflow-x-auto my-4">
+                    <table className="w-full border border-gray-300 rounded-lg text-sm">
+                        {children}
+                    </table>
+                    </div>
+                );
+                },
+
+                thead({ children }) {
+                return (
+                    <thead className="bg-gray-100 text-gray-700 font-semibold">
+                    {children}
+                    </thead>
+                );
+                },
+
+                tbody({ children }) {
+                return <tbody className="divide-y divide-gray-200">{children}</tbody>;
+                },
+
+                tr({ children }) {
+                return (
+                    <tr className="border-b last:border-none hover:bg-gray-50 transition">
+                    {children}
+                    </tr>
+                );
+                },
+
+                th({ children }) {
+                return (
+                    <th className="px-4 py-2 text-left font-bold border-r last:border-r-0">
+                    {children}
+                    </th>
+                );
+                },
+
+                td({ children }) {
+                return (
+                    <td className="px-4 py-2 align-top border-r last:border-r-0">
+                    {children}
+                    </td>
+                );
+                },
+                code({ node, className, children, ...props }) {
                 const match = /language-(\w+)/.exec(className || "");
-                return !inline && match ? (
-                  <SyntaxHighlighter
+
+                return match ? (
+                    <SyntaxHighlighter
                     style={atomOneLight}
                     language={match[1]}
                     PreTag="div"
-                  >
+                    >
                     {String(children).replace(/\n$/, "")}
-                  </SyntaxHighlighter>
+                    </SyntaxHighlighter>
                 ) : (
-                  <code className="px-1 py-0.5 rounded bg-black/10 text-[0.85em]">
+                    <code
+                    className="px-1 py-0.5 rounded bg-black/10 text-[0.85em]"
+                    {...props}
+                    >
                     {children}
-                  </code>
+                    </code>
                 );
-              },
+                }
+
             }}
           >
             {message.text}
