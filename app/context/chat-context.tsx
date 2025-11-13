@@ -1,151 +1,118 @@
-"use client"
+"use client";
 
-import type React from "react"
-import { createContext, useContext, useEffect, useState } from "react"
+import React, { createContext, useContext, useState } from "react";
 
-export interface Message {
-  id: string
-  text: string
-  sender: "user" | "bot"
-  timestamp: Date
-}
+export type Message = {
+  id: string;
+  text: string;
+  sender: "user" | "bot";
+  timestamp: Date;
+};
 
-export interface Chat {
-  id: string
-  title: string
-  messages: Message[]
-  createdAt: Date
-  updatedAt: Date
-}
+export type Chat = {
+  id: string;
+  title: string;
+  messages: Message[];
+};
 
-interface ChatContextType {
-  chats: Chat[]
-  currentChatId: string | null
-  currentChat: Chat | null
-  createNewChat: () => void
-  selectChat: (chatId: string) => void
-  deleteChat: (chatId: string) => void
-  addMessage: (message: Message) => void
-}
+type ChatContextType = {
+  chats: Chat[];
+  currentChat: Chat | null;
+  currentChatId: string | null;
+  createNewChat: () => void;
+  selectChat: (id: string) => void;
+  deleteChat: (id: string) => void;
+  addMessage: (message: Message) => void;
+  updateLastBotMessage: (text: string) => void; // <-- NEW
+};
 
-const ChatContext = createContext<ChatContextType | undefined>(undefined)
-
-const STORAGE_KEY = "chatbot_chats"
+const ChatContext = createContext<ChatContextType | undefined>(undefined);
 
 export function ChatProvider({ children }: { children: React.ReactNode }) {
-  const [chats, setChats] = useState<Chat[]>([])
-  const [currentChatId, setCurrentChatId] = useState<string | null>(null)
-  const [isMounted, setIsMounted] = useState(false)
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
 
-  useEffect(() => {
-    const savedChats = localStorage.getItem(STORAGE_KEY)
-    if (savedChats) {
-      try {
-        const parsed = JSON.parse(savedChats)
-        const restoredChats = parsed.map((chat: any) => ({
-          ...chat,
-          messages: chat.messages.map((msg: any) => ({
-            ...msg,
-            timestamp: new Date(msg.timestamp),
-          })),
-          createdAt: new Date(chat.createdAt),
-          updatedAt: new Date(chat.updatedAt),
-        }))
-        setChats(restoredChats)
-        if (restoredChats.length > 0) {
-          setCurrentChatId(restoredChats[0].id)
-        }
-      } catch (error) {
-        console.error("Failed to load chats:", error)
-      }
-    } else {
-      // Create initial chat
-      const initialChat = createChat()
-      setChats([initialChat])
-      setCurrentChatId(initialChat.id)
-    }
-    setIsMounted(true)
-  }, [])
-
-  useEffect(() => {
-    if (isMounted) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(chats))
-    }
-  }, [chats, isMounted])
-
-  function createChat(): Chat {
-    const now = new Date()
-    return {
-      id: Date.now().toString(),
-      title: `Chat ${new Date().toLocaleDateString()}`,
-      messages: [
-        {
-          id: "1",
-          text: "Hello! How can I help you today?",
-          sender: "bot",
-          timestamp: now,
-        },
-      ],
-      createdAt: now,
-      updatedAt: now,
-    }
-  }
+  const currentChat = chats.find((c) => c.id === currentChatId) || null;
 
   const createNewChat = () => {
-    const newChat = createChat()
-    setChats((prev) => [newChat, ...prev])
-    setCurrentChatId(newChat.id)
-  }
+    const id = crypto.randomUUID();
 
-  const selectChat = (chatId: string) => {
-    setCurrentChatId(chatId)
-  }
+    const newChat: Chat = {
+      id,
+      title: `Chat ${chats.length + 1}`,
+      messages: [],
+    };
 
-  const deleteChat = (chatId: string) => {
-    setChats((prev) => prev.filter((chat) => chat.id !== chatId))
-    if (currentChatId === chatId) {
-      const remaining = chats.filter((chat) => chat.id !== chatId)
-      setCurrentChatId(remaining.length > 0 ? remaining[0].id : null)
+    setChats((prev) => [...prev, newChat]);
+    setCurrentChatId(id);
+  };
+
+  const selectChat = (id: string) => {
+    setCurrentChatId(id);
+  };
+
+  const deleteChat = (id: string) => {
+    setChats((prev) => prev.filter((c) => c.id !== id));
+
+    if (currentChatId === id) {
+      setCurrentChatId(chats.length > 1 ? chats[0].id : null);
     }
-  }
+  };
 
   const addMessage = (message: Message) => {
     setChats((prev) =>
       prev.map((chat) =>
         chat.id === currentChatId
-          ? {
-              ...chat,
-              messages: [...chat.messages, message],
-              updatedAt: new Date(),
-            }
-          : chat,
-      ),
-    )
-  }
+          ? { ...chat, messages: [...chat.messages, message] }
+          : chat
+      )
+    );
+  };
 
-  const currentChat = chats.find((chat) => chat.id === currentChatId) || null
+  /**
+   * Updates ONLY the last bot message (used for streaming)
+   */
+  const updateLastBotMessage = (text: string) => {
+    setChats((prev) =>
+      prev.map((chat) => {
+        if (chat.id !== currentChatId) return chat;
+
+        const updatedMessages = [...chat.messages];
+        const lastIndex = updatedMessages.length - 1;
+
+        if (lastIndex < 0) return chat;
+        if (updatedMessages[lastIndex].sender !== "bot") return chat;
+
+        updatedMessages[lastIndex] = {
+          ...updatedMessages[lastIndex],
+          text,
+        };
+
+        return { ...chat, messages: updatedMessages };
+      })
+    );
+  };
 
   return (
     <ChatContext.Provider
       value={{
         chats,
-        currentChatId,
         currentChat,
+        currentChatId,
         createNewChat,
         selectChat,
         deleteChat,
         addMessage,
+        updateLastBotMessage,
       }}
     >
       {children}
     </ChatContext.Provider>
-  )
+  );
 }
 
 export function useChat() {
-  const context = useContext(ChatContext)
-  if (context === undefined) {
-    throw new Error("useChat must be used within a ChatProvider")
-  }
-  return context
+  const context = useContext(ChatContext);
+  if (!context) throw new Error("useChat must be used within ChatProvider");
+  return context;
 }
