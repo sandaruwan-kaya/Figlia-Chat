@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState } from "react";
+import React, { createContext, useContext, useEffect, useState } from "react";
 
 export type Message = {
   id: string;
@@ -20,7 +20,6 @@ type ChatContextType = {
   currentChat: Chat | null;
   currentChatId: string | null;
 
-  // Actions
   createNewChat: () => void;
   selectChat: (id: string) => void;
   deleteChat: (id: string) => void;
@@ -39,7 +38,59 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
   const currentChat = chats.find((c) => c.id === currentChatId) || null;
 
-  // Create new empty Chat
+  // -------------------------------------
+  // 🚀 Load from localStorage on first load
+  // -------------------------------------
+  useEffect(() => {
+    try {
+      const savedChats = localStorage.getItem("chatbot-chats");
+      const savedChatId = localStorage.getItem("chatbot-currentChatId");
+
+      if (savedChats) {
+        const parsedChats: Chat[] = JSON.parse(savedChats);
+
+        // Convert timestamps back to Date objects
+        parsedChats.forEach((chat) => {
+          chat.messages = chat.messages.map((m) => ({
+            ...m,
+            timestamp: new Date(m.timestamp),
+          }));
+        });
+
+        setChats(parsedChats);
+
+        if (savedChatId) {
+          const exists = parsedChats.some((c) => c.id === savedChatId);
+          setCurrentChatId(exists ? savedChatId : parsedChats[0]?.id || null);
+        } else {
+          setCurrentChatId(parsedChats[0]?.id || null);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load chat history:", err);
+    }
+  }, []);
+
+  // -------------------------------------
+  // 💾 Save chats whenever they change
+  // -------------------------------------
+  useEffect(() => {
+    localStorage.setItem("chatbot-chats", JSON.stringify(chats));
+  }, [chats]);
+
+  // -------------------------------------
+  // 💾 Save currentChatId
+  // -------------------------------------
+  useEffect(() => {
+    if (currentChatId) {
+      localStorage.setItem("chatbot-currentChatId", currentChatId);
+    }
+  }, [currentChatId]);
+
+  // -------------------------------------
+  // Chat Management Methods
+  // -------------------------------------
+
   const createNewChat = () => {
     const id = crypto.randomUUID();
     const newChat: Chat = {
@@ -59,15 +110,23 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const deleteChat = (id: string) => {
     setChats((prev) => prev.filter((c) => c.id !== id));
 
-    // If deleting the currently open chat → pick first one or null
     if (currentChatId === id) {
-      setCurrentChatId((chats.length > 1 ? chats[0].id : null));
+      setCurrentChatId(null);
+
+      setTimeout(() => {
+        setCurrentChatId((prevChats) => {
+          const updated = prevChats;
+          return updated.length > 0 ? updated[0].id : null;
+        });
+      }, 20);
     }
   };
 
   const clearAllChats = () => {
     setChats([]);
     setCurrentChatId(null);
+    localStorage.removeItem("chatbot-chats");
+    localStorage.removeItem("chatbot-currentChatId");
   };
 
   const renameChat = (id: string, newTitle: string) => {
@@ -88,23 +147,17 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     );
   };
 
-  // Streaming updates to bot message
   const updateLastBotMessage = (text: string) => {
     setChats((prev) =>
       prev.map((chat) => {
         if (chat.id !== currentChatId) return chat;
-
         if (chat.messages.length === 0) return chat;
 
         const updated = [...chat.messages];
-        const lastIndex = updated.length - 1;
+        const last = updated[updated.length - 1];
 
-        // Only update if last message is from bot
-        if (updated[lastIndex].sender === "bot") {
-          updated[lastIndex] = {
-            ...updated[lastIndex],
-            text,
-          };
+        if (last.sender === "bot") {
+          updated[updated.length - 1] = { ...last, text };
         }
 
         return { ...chat, messages: updated };
