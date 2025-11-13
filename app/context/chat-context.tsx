@@ -108,18 +108,16 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   };
 
   const deleteChat = (id: string) => {
-    setChats((prev) => prev.filter((c) => c.id !== id));
+    setChats((prev) => {
+      const filtered = prev.filter((chat) => chat.id !== id);
 
-    if (currentChatId === id) {
-      setCurrentChatId(null);
+      // Determine next current chat AFTER deletion
+      if (currentChatId === id) {
+        setCurrentChatId(filtered.length > 0 ? filtered[0].id : null);
+      }
 
-      setTimeout(() => {
-        setCurrentChatId((prevChats) => {
-          const updated = prevChats;
-          return updated.length > 0 ? updated[0].id : null;
-        });
-      }, 20);
-    }
+      return filtered;
+    });
   };
 
   const clearAllChats = () => {
