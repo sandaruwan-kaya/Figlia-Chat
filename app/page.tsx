@@ -3,9 +3,11 @@
 import type React from "react";
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Send, MessageCircle, Trash2, Plus } from "lucide-react";
+import { Send, MessageCircle, Plus, Trash2, Edit2 } from "lucide-react";
 import { useChat, type Message } from "./context/chat-context";
+
+import MessageBubble from "@/components/MessageBubble";
+import { TypingIndicator } from "@/components/TypingIndicator";
 
 export default function ChatBot() {
   const {
@@ -15,6 +17,8 @@ export default function ChatBot() {
     createNewChat,
     selectChat,
     deleteChat,
+    clearAllChats,
+    renameChat,
     addMessage,
     updateLastBotMessage,
   } = useChat();
@@ -23,40 +27,32 @@ export default function ChatBot() {
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
+  const abortController = useRef<AbortController | null>(null);
 
+  // Auto-scroll on update
   useEffect(() => {
-    scrollToBottom();
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [currentChat?.messages]);
 
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-
+  // Send message handler
+  const handleSendMessage = async (e: React.FormEvent | KeyboardEvent) => {
+    if ("preventDefault" in e) e.preventDefault();
     if (!input.trim()) return;
 
-    // 1️⃣ Determine or create chat BEFORE sending message
-    let chatId = currentChatId;
+    let activeChatId = currentChatId;
 
-    if (!chatId) {
+    // 1️⃣ Create chat automatically if none selected
+    if (!activeChatId) {
       createNewChat();
-
-      // Wait for React to update the new chat
-      await new Promise((resolve) => setTimeout(resolve, 20));
-
-      // Get the newly created chat
-      const latestChat = chats[chats.length - 1];
-      chatId = latestChat?.id;
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      activeChatId = chats[chats.length - 1]?.id;
     }
+    if (!activeChatId) return;
 
-    if (!chatId) return; // fail-safe
-
-    // Identify current chat safely
-    const activeChat = chats.find((c) => c.id === chatId);
+    const activeChat = chats.find((c) => c.id === activeChatId);
     const previousMessages = activeChat?.messages || [];
 
-    // 2️⃣ Add USER message
+    // 2️⃣ User message
     const userMessage: Message = {
       id: crypto.randomUUID(),
       text: input,
@@ -68,7 +64,7 @@ export default function ChatBot() {
     setInput("");
     setIsLoading(true);
 
-    // 3️⃣ Add placeholder BOT message for streaming updates
+    // 3️⃣ Bot placeholder (for streaming)
     const botMessage: Message = {
       id: crypto.randomUUID(),
       text: "",
@@ -77,7 +73,10 @@ export default function ChatBot() {
     };
     addMessage(botMessage);
 
-    // 4️⃣ Call the OpenAI API with fully correct message history
+    abortController.current = new AbortController();
+    setIsLoading(true);
+
+    // 4️⃣ API request
     const response = await fetch("/api/chat", {
       method: "POST",
       body: JSON.stringify({
@@ -89,9 +88,10 @@ export default function ChatBot() {
           { role: "user", content: userMessage.text },
         ],
       }),
+      signal: abortController.current.signal,
     });
 
-    // 5️⃣ Streaming response
+    // 5️⃣ Streaming back
     const reader = response.body?.getReader();
     const decoder = new TextDecoder();
     let botText = "";
@@ -99,15 +99,33 @@ export default function ChatBot() {
     if (!reader) return;
 
     while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+      try {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-      botText += decoder.decode(value);
-      updateLastBotMessage(botText);
+        botText += decoder.decode(value);
+        updateLastBotMessage(botText);
+
+      } catch (err: any) {
+        if (err.name === "AbortError") {
+          console.log("🛑 STOP: stream aborted cleanly");
+          break;
+        }
+        throw err;
+      }
     }
+
 
     setIsLoading(false);
   };
+
+  const handleStop = () => {
+  if (abortController.current) {
+    abortController.current.abort();
+  }
+  setIsLoading(false);
+};
+
 
   return (
     <div className="flex h-screen bg-background">
@@ -121,17 +139,28 @@ export default function ChatBot() {
         <Button
           onClick={createNewChat}
           variant="outline"
-          className="w-full justify-start mb-4 bg-transparent hover:bg-muted gap-2"
+          className="w-full justify-start mb-3 gap-2"
         >
           <Plus className="w-4 h-4" /> New Chat
         </Button>
 
+        {/* <Button
+          variant="destructive"
+          className="w-full mb-3"
+          onClick={() => {
+            if (confirm("Delete all chats?")) clearAllChats();
+          }}
+        >
+          Delete All Chats
+        </Button> */}
+
+        {/* Chat history list */}
         <div className="flex-1 overflow-y-auto space-y-1 pr-1 mb-4">
           {chats.map((chat) => {
             const lastMsg = chat.messages[chat.messages.length - 1];
             const preview =
-              lastMsg?.text.length > 35
-                ? lastMsg.text.slice(0, 35) + "..."
+              lastMsg?.text.length > 40
+                ? lastMsg.text.slice(0, 40) + "..."
                 : lastMsg?.text;
 
             return (
@@ -154,6 +183,19 @@ export default function ChatBot() {
                     )}
                   </div>
 
+                  {/* Rename */}
+                  {/* <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const newTitle = prompt("Rename chat:");
+                      if (newTitle) renameChat(chat.id, newTitle);
+                    }}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity p-1"
+                  >
+                    <Edit2 className="w-4 h-4" />
+                  </button> */}
+
+                  {/* Delete */}
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -164,15 +206,6 @@ export default function ChatBot() {
                     <Trash2 className="w-4 h-4 text-destructive" />
                   </button>
                 </div>
-
-                {lastMsg && (
-                  <p className="text-[10px] opacity-60 mt-1">
-                    {lastMsg.timestamp.toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </p>
-                )}
               </div>
             );
           })}
@@ -185,75 +218,80 @@ export default function ChatBot() {
 
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col">
+        {/* Header */}
         <div className="border-b border-border bg-card p-4 flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold">
               {currentChat?.title || "Chat Assistant"}
             </h2>
-            <p className="text-sm text-muted-foreground">Always here to help</p>
+            <p className="text-sm text-muted-foreground">
+              Always here to help
+            </p>
           </div>
-          <Button
-            onClick={createNewChat}
-            variant="outline"
-            size="icon"
-            className="md:hidden bg-transparent"
-          >
-            <Plus className="w-4 h-4" />
-          </Button>
         </div>
 
-        {/* Messages */}
+        {/* Messages Area */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {currentChat?.messages.map((message) => (
-            <div
-              key={message.id}
-              className={`flex ${
-                message.sender === "user" ? "justify-end" : "justify-start"
-              }`}
-            >
-              <div
-                className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
-                  message.sender === "user"
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-muted text-foreground"
-                }`}
-              >
-                <p className="text-sm whitespace-pre-line">{message.text}</p>
-              </div>
-            </div>
-          ))}
 
-          {isLoading && (
-            <div className="flex">
-              <div className="bg-muted text-foreground px-4 py-2 rounded-lg flex gap-2">
-                <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce"></div>
-                <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce delay-100"></div>
-                <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce delay-200"></div>
-              </div>
+          {/* Welcome screen */}
+          {!currentChat && (
+            <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground">
+              <div className="mb-4 text-4xl">🤖</div>
+              <h2 className="text-2xl font-semibold mb-2">Welcome to ChatBot</h2>
+              <p className="text-sm">Start a conversation by typing below.</p>
             </div>
           )}
+
+          {/* Messages */}
+          {currentChat?.messages?.map((message) => (
+            <MessageBubble key={message.id} message={message} />
+          ))}
+
+          {isLoading && <TypingIndicator />}
 
           <div ref={messagesEndRef} />
         </div>
 
         {/* Input */}
         <div className="border-t border-border bg-card p-4">
-          <form onSubmit={handleSendMessage} className="flex gap-2">
-            <Input
+          <form
+            onSubmit={handleSendMessage}
+            className="flex gap-2 items-end"
+          >
+            {/* Multi-line input */}
+            <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSendMessage(e);
+                }
+              }}
+              rows={1}
               placeholder="Type your message..."
               disabled={isLoading}
-              className="flex-1"
+              className="flex-1 resize-none p-2 rounded-md border border-input focus:outline-none"
             />
-            <Button
-              type="submit"
-              disabled={isLoading || !input.trim()}
-              size="icon"
-              className="bg-primary hover:bg-primary/90"
-            >
-              <Send className="w-4 h-4" />
-            </Button>
+
+            {isLoading ? (
+              <Button
+                onClick={handleStop}
+                type="button"
+                className="bg-red-500 hover:bg-red-600 text-white"
+              >
+                Stop
+              </Button>
+            ) : (
+              <Button
+                type="submit"
+                disabled={!input.trim()}
+                size="icon"
+                className="bg-primary hover:bg-primary/90"
+              >
+                <Send className="w-4 h-4" />
+              </Button>
+            )}
           </form>
         </div>
       </div>

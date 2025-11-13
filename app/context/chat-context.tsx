@@ -19,11 +19,16 @@ type ChatContextType = {
   chats: Chat[];
   currentChat: Chat | null;
   currentChatId: string | null;
+
+  // Actions
   createNewChat: () => void;
   selectChat: (id: string) => void;
   deleteChat: (id: string) => void;
+  clearAllChats: () => void;
+  renameChat: (id: string, newTitle: string) => void;
+
   addMessage: (message: Message) => void;
-  updateLastBotMessage: (text: string) => void; // <-- NEW
+  updateLastBotMessage: (text: string) => void;
 };
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
@@ -34,9 +39,9 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
   const currentChat = chats.find((c) => c.id === currentChatId) || null;
 
+  // Create new empty Chat
   const createNewChat = () => {
     const id = crypto.randomUUID();
-
     const newChat: Chat = {
       id,
       title: `Chat ${chats.length + 1}`,
@@ -54,9 +59,23 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const deleteChat = (id: string) => {
     setChats((prev) => prev.filter((c) => c.id !== id));
 
+    // If deleting the currently open chat → pick first one or null
     if (currentChatId === id) {
-      setCurrentChatId(chats.length > 1 ? chats[0].id : null);
+      setCurrentChatId((chats.length > 1 ? chats[0].id : null));
     }
+  };
+
+  const clearAllChats = () => {
+    setChats([]);
+    setCurrentChatId(null);
+  };
+
+  const renameChat = (id: string, newTitle: string) => {
+    setChats((prev) =>
+      prev.map((chat) =>
+        chat.id === id ? { ...chat, title: newTitle } : chat
+      )
+    );
   };
 
   const addMessage = (message: Message) => {
@@ -69,26 +88,26 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     );
   };
 
-  /**
-   * Updates ONLY the last bot message (used for streaming)
-   */
+  // Streaming updates to bot message
   const updateLastBotMessage = (text: string) => {
     setChats((prev) =>
       prev.map((chat) => {
         if (chat.id !== currentChatId) return chat;
 
-        const updatedMessages = [...chat.messages];
-        const lastIndex = updatedMessages.length - 1;
+        if (chat.messages.length === 0) return chat;
 
-        if (lastIndex < 0) return chat;
-        if (updatedMessages[lastIndex].sender !== "bot") return chat;
+        const updated = [...chat.messages];
+        const lastIndex = updated.length - 1;
 
-        updatedMessages[lastIndex] = {
-          ...updatedMessages[lastIndex],
-          text,
-        };
+        // Only update if last message is from bot
+        if (updated[lastIndex].sender === "bot") {
+          updated[lastIndex] = {
+            ...updated[lastIndex],
+            text,
+          };
+        }
 
-        return { ...chat, messages: updatedMessages };
+        return { ...chat, messages: updated };
       })
     );
   };
@@ -102,6 +121,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         createNewChat,
         selectChat,
         deleteChat,
+        clearAllChats,
+        renameChat,
         addMessage,
         updateLastBotMessage,
       }}
@@ -113,6 +134,6 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
 export function useChat() {
   const context = useContext(ChatContext);
-  if (!context) throw new Error("useChat must be used within ChatProvider");
+  if (!context) throw new Error("useChat must be used inside ChatProvider");
   return context;
 }
